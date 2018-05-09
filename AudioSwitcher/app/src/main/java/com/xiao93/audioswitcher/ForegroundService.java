@@ -9,6 +9,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
+import android.media.AudioManager;
 import android.media.session.MediaController;
 import android.media.session.MediaSession;
 import android.media.session.MediaSessionManager;
@@ -28,12 +29,17 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
+import static android.media.AudioManager.STREAM_MUSIC;
+
 public class ForegroundService extends Service {
 
     private static final String TAG = "ForegroundService";
 
+    private final int deltaVolumeLevel = 3;
+
     boolean mShouldBeEnabled = true;
     MediaSession mMediaSession;
+    AudioManager mAudioManager;
     ComponentName mComponentName;
 
     int currentState = 0;
@@ -79,6 +85,7 @@ public class ForegroundService extends Service {
 
         boolean playMusicState = playMusicStates.get(currentState);
         if (playMusicState) {
+            changeVolume(-1);
             Intent intent = new Intent("com.android.music.musicservicecommand");
             intent.putExtra("command", "play");
             sendBroadcast(intent);
@@ -90,7 +97,7 @@ public class ForegroundService extends Service {
 
         boolean podcastAddictState = podcastAddictStates.get(currentState);
         if (podcastAddictState) {
-
+            changeVolume(1);
             Intent intent = new Intent("com.bambuna.podcastaddict.service.player.play");
             sendBroadcast(intent);
         } else {
@@ -99,6 +106,25 @@ public class ForegroundService extends Service {
         }
 
         Log.d(TAG, "Changing state. Music: " + Boolean.toString(playMusicState) + ", Podcast: " + Boolean.toString(podcastAddictState));
+    }
+
+    private void changeVolume(int direction) {
+        if (mAudioManager == null) {
+            return;
+        }
+
+        int currentStreamVolume = mAudioManager.getStreamVolume(STREAM_MUSIC);
+        Log.d(TAG, "Volume before change: " + Integer.toString(currentStreamVolume));
+        int newVolume = currentStreamVolume + direction * deltaVolumeLevel;
+        if (newVolume < 0) {
+            newVolume = 0;
+        }
+        int maxVolume = mAudioManager.getStreamMaxVolume(STREAM_MUSIC);
+        if (newVolume > maxVolume) {
+            newVolume = maxVolume;
+        }
+        mAudioManager.setStreamVolume(STREAM_MUSIC, newVolume, AudioManager.FLAG_PLAY_SOUND);
+        Log.d(TAG, "Volume after change: " + Integer.toString(newVolume));
     }
 
     protected BroadcastReceiver stopServiceReceiver = new BroadcastReceiver() {
@@ -123,6 +149,9 @@ public class ForegroundService extends Service {
                 .setContentIntent(contentIntent)
                 .setOngoing(true)
                 .build();
+
+        mAudioManager = (AudioManager) getApplicationContext().getSystemService(Context.AUDIO_SERVICE);
+
 
         MediaSessionManager mMediaSessionManager = (MediaSessionManager) getSystemService(Context.MEDIA_SESSION_SERVICE);
         if (mMediaSessionManager == null) {
