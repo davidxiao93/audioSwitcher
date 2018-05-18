@@ -56,12 +56,12 @@ public class MainActivity extends AppCompatActivity implements OnClickListener {
         switch (v.getId()) {
             case R.id.start_music_button:
                 Intent startMusicIntent = new Intent(MainActivity.this, ForegroundService.class);
-                startMusicIntent.setAction(Constants.ACTION.STARTFOREGROUND_ACTION_MUSIC);
+                startMusicIntent.setAction(Constants.ACTION.START_MUSIC);
                 startService(startMusicIntent);
                 break;
             case R.id.start_podcast_button:
                 Intent startPodcastIntent = new Intent(MainActivity.this, ForegroundService.class);
-                startPodcastIntent.setAction(Constants.ACTION.STARTFOREGROUND_ACTION_PODCAST);
+                startPodcastIntent.setAction(Constants.ACTION.START_PODCAST);
                 startService(startPodcastIntent);
                 break;
             default:

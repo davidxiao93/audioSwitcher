@@ -38,11 +38,14 @@ public class ForegroundService extends Service {
     private final int deltaVolumeLevel = 3;
 
     boolean mShouldBeEnabled = true;
+
     MediaSession mMediaSession;
     AudioManager mAudioManager;
     ComponentName mComponentName;
 
     int currentState = 0;
+    int lastVolumeChangeDirection = 0;
+
     List<Boolean> playMusicStates = Arrays.asList(false, true, false, false);
     List<Boolean> podcastAddictStates = Arrays.asList(false, false, false, true);
 
@@ -61,18 +64,24 @@ public class ForegroundService extends Service {
             return START_STICKY;
         }
 
-        if (intent.getAction().equals(Constants.ACTION.STARTFOREGROUND_ACTION_MUSIC)) {
+        if (intent.getAction().equals(Constants.ACTION.START_MUSIC)) {
             currentState = 1;
             handleCurrentState();
             Log.i(TAG, "Received Start Foreground Intent ");
             startService();
-        } else if (intent.getAction().equals(Constants.ACTION.STARTFOREGROUND_ACTION_PODCAST)) {
+        } else if (intent.getAction().equals(Constants.ACTION.START_PODCAST)) {
             currentState = 3;
             handleCurrentState();
             Log.i(TAG, "Received Start Foreground Intent ");
             startService();
-
-        } else if (intent.getAction().equals(Constants.ACTION.STOPFOREGROUND_ACTION)) {
+        } else if (intent.getAction().equals(Constants.ACTION.PAUSE)) {
+            if (currentState == 1 || currentState == 3) {
+                currentState = (currentState + 1) % playMusicStates.size();
+            }
+            handleCurrentState();
+            Log.i(TAG, "Received Pause Foreground Intent ");
+            startService();
+        } else if (intent.getAction().equals(Constants.ACTION.STOP)) {
             Log.i(TAG, "Received Stop Foreground Intent");
             stopForeground(true);
             stopSelf();
@@ -85,7 +94,7 @@ public class ForegroundService extends Service {
 
         boolean playMusicState = playMusicStates.get(currentState);
         if (playMusicState) {
-            changeVolume(-1);
+            maybeChangeVolume(-1);
             Intent intent = new Intent("com.android.music.musicservicecommand");
             intent.putExtra("command", "play");
             sendBroadcast(intent);
@@ -97,7 +106,7 @@ public class ForegroundService extends Service {
 
         boolean podcastAddictState = podcastAddictStates.get(currentState);
         if (podcastAddictState) {
-            changeVolume(1);
+            maybeChangeVolume(1);
             Intent intent = new Intent("com.bambuna.podcastaddict.service.player.play");
             sendBroadcast(intent);
         } else {
@@ -108,10 +117,16 @@ public class ForegroundService extends Service {
         Log.d(TAG, "Changing state. Music: " + Boolean.toString(playMusicState) + ", Podcast: " + Boolean.toString(podcastAddictState));
     }
 
-    private void changeVolume(int direction) {
+    private void maybeChangeVolume(int direction) {
         if (mAudioManager == null) {
             return;
         }
+        if (direction * lastVolumeChangeDirection > 0) {
+            // Don't do any volume changes
+            return;
+        }
+
+        lastVolumeChangeDirection = direction;
 
         int currentStreamVolume = mAudioManager.getStreamVolume(STREAM_MUSIC);
         Log.d(TAG, "Volume before change: " + Integer.toString(currentStreamVolume));
@@ -127,19 +142,55 @@ public class ForegroundService extends Service {
         Log.d(TAG, "Volume after change: " + Integer.toString(newVolume));
     }
 
-    protected BroadcastReceiver stopServiceReceiver = new BroadcastReceiver() {
+    protected BroadcastReceiver broadcastReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
-            unregisterReceiver(this);
-            stopForeground(true);
-            stopSelf();
+            if (intent == null) {
+                return;
+            }
+            String action = intent.getAction();
+
+            if (Constants.ACTION.START_MUSIC.equals(action)) {
+                currentState = 1;
+                handleCurrentState();
+                Log.i(TAG, "Received Start Foreground Intent ");
+            } else if (Constants.ACTION.START_PODCAST.equals(action)) {
+                currentState = 3;
+                handleCurrentState();
+                Log.i(TAG, "Received Start Foreground Intent ");
+            } else if (Constants.ACTION.PAUSE.equals(action)) {
+                if (currentState == 1 || currentState == 3) {
+                    currentState = (currentState + 1) % playMusicStates.size();
+                }
+                handleCurrentState();
+                Log.i(TAG, "Received Pause Foreground Intent ");
+            } else if (Constants.ACTION.STOP.equals(action)) {
+                unregisterReceiver(this);
+                stopForeground(true);
+                stopSelf();
+            }
         }
     };
 
+
     private void startService() {
 
-        registerReceiver(stopServiceReceiver, new IntentFilter(Constants.ACTION.STOPFOREGROUND_ACTION));
-        PendingIntent contentIntent = PendingIntent.getBroadcast(this, 0, new Intent(Constants.ACTION.STOPFOREGROUND_ACTION), PendingIntent.FLAG_UPDATE_CURRENT);
+        IntentFilter intentFilter = new IntentFilter();
+        intentFilter.addAction(Constants.ACTION.START_MUSIC);
+        intentFilter.addAction(Constants.ACTION.START_PODCAST);
+        intentFilter.addAction(Constants.ACTION.STOP);
+        intentFilter.addAction(Constants.ACTION.PAUSE);
+
+        registerReceiver(broadcastReceiver, intentFilter);
+
+        PendingIntent startMusicPendingIntent = PendingIntent.getBroadcast(this, 0, new Intent(Constants.ACTION.START_MUSIC), PendingIntent.FLAG_UPDATE_CURRENT);
+        PendingIntent startPodcastPendingIntent = PendingIntent.getBroadcast(this, 0, new Intent(Constants.ACTION.START_PODCAST), PendingIntent.FLAG_UPDATE_CURRENT);
+        PendingIntent pausePendingIntent = PendingIntent.getBroadcast(this, 0, new Intent(Constants.ACTION.PAUSE), PendingIntent.FLAG_UPDATE_CURRENT);
+        PendingIntent contentIntent = PendingIntent.getBroadcast(this, 0, new Intent(Constants.ACTION.STOP), PendingIntent.FLAG_UPDATE_CURRENT);
+
+        Notification.Action startMusicAction = new Notification.Action.Builder(R.mipmap.icon_launcher, "Music", startMusicPendingIntent).build();
+        Notification.Action startPodcastAction = new Notification.Action.Builder(R.mipmap.icon_launcher, "Podcast", startPodcastPendingIntent).build();
+        Notification.Action pauseAction = new Notification.Action.Builder(R.mipmap.icon_launcher, "Pause", pausePendingIntent).build();
 
         Notification notification = new Notification.Builder(this)
                 .setContentTitle("Audio Switcher")
@@ -148,6 +199,9 @@ public class ForegroundService extends Service {
                 .setSmallIcon(R.mipmap.icon_launcher)
                 .setContentIntent(contentIntent)
                 .setOngoing(true)
+                .addAction(startMusicAction)
+                .addAction(startPodcastAction)
+                .addAction(pauseAction)
                 .build();
 
         mAudioManager = (AudioManager) getApplicationContext().getSystemService(Context.AUDIO_SERVICE);
